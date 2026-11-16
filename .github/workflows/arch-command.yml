@@ -26,7 +26,7 @@ jobs:
         env:
           COMMAND: ${{ inputs.command }}
         run: |
-          pacman -Q pacman
+          pacman -Q pacman 2>/dev/null
           printf 'Command: %s\n' "$COMMAND"
           printf 'Output:\n'
           bash -c "$COMMAND"

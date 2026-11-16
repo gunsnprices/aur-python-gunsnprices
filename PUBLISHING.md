@@ -35,19 +35,22 @@ matching `gunsnprices`.
 3. The form asks a verification question that has to be answered on Arch Linux, for example
    "What is the output of `LC_ALL=C pacman -V|sed -r 's#[0-9]+#NN#g'|md5sum|cut -c1-6`?"
    (the number changes). Without an Arch machine, use this repository's helper workflow while the
-   form stays open:
+   form stays open. Paste the command exactly as shown on the form, with its number, in place of
+   the example:
 
-       GH_TOKEN="$(cat ~/.gunsnprices-secrets/github_token.txt)" gh workflow run arch-command.yml \
-         -R gunsnprices/aur-python-gunsnprices \
+       export GH_TOKEN="$(cat ~/.gunsnprices-secrets/github_token.txt)"
+       R=gunsnprices/aur-python-gunsnprices
+       gh workflow run arch-command.yml -R $R \
          -f command="LC_ALL=C pacman -V|sed -r 's#[0-9]+#NN#g'|md5sum|cut -c1-6"
-       # wait about a minute, then:
-       GH_TOKEN="$(cat ~/.gunsnprices-secrets/github_token.txt)" gh run view -R gunsnprices/aur-python-gunsnprices \
-         --log "$(GH_TOKEN="$(cat ~/.gunsnprices-secrets/github_token.txt)" gh run list -R gunsnprices/aur-python-gunsnprices \
-         -w arch-command.yml -L 1 --json databaseId -q '.[0].databaseId')" | tail -n 3
+       sleep 10
+       RUN=$(gh run list -R $R -w arch-command.yml -L 1 --json databaseId -q '.[0].databaseId')
+       gh run watch "$RUN" -R $R --exit-status > /dev/null
+       gh run view "$RUN" -R $R --log | grep 'Run the command' | tail -n 1 | awk '{print $NF}'
+       unset GH_TOKEN
 
-   Or on github.com: Actions, "Run a command on Arch Linux", "Run workflow". Paste the command
-   exactly as shown on the form (with its number). The last line of the "Run the command" step is
-   the 6-character answer.
+   The last command prints the 6-character answer (a run takes about 40 seconds). The same
+   works on github.com: Actions, "Run a command on Arch Linux", "Run workflow". The answer is the
+   last line of the "Run the command" step.
 4. Submit. The AUR sends an email to the address with a link to set the password.
 
 ## 2. SSH key (done on this Mac)

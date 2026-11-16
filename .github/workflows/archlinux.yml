@@ -24,13 +24,17 @@ jobs:
         shell: bash
     env:
       BUILD_DIR: /home/builder/build
+      # PATH of an Arch login shell (/etc/profile). The container default also
+      # has /usr/sbin, which is a symlink to /usr/bin that no package owns, so
+      # namcap's shebang lookup (shutil.which) would miss /usr/bin/python.
+      ARCH_PATH: /usr/local/sbin:/usr/local/bin:/usr/bin
     steps:
       - name: Update the system; install base-devel, namcap and git
         run: |
           pacman -Syu --noconfirm --needed base-devel namcap git
           pacman -Q pacman python namcap
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Create the unprivileged build user
         run: |
@@ -51,7 +55,7 @@ jobs:
       - name: namcap PKGBUILD
         working-directory: ${{ env.BUILD_DIR }}
         run: |
-          namcap PKGBUILD | tee /tmp/namcap-pkgbuild.txt
+          env PATH="$ARCH_PATH" namcap PKGBUILD | tee /tmp/namcap-pkgbuild.txt
           if grep -q ' E: ' /tmp/namcap-pkgbuild.txt; then
             echo "::error::namcap reported errors for PKGBUILD"
             exit 1
@@ -67,7 +71,7 @@ jobs:
       - name: namcap on the built package
         working-directory: ${{ env.BUILD_DIR }}
         run: |
-          namcap python-gunsnprices-*-any.pkg.tar.zst | tee /tmp/namcap-package.txt
+          env PATH="$ARCH_PATH" namcap python-gunsnprices-*-any.pkg.tar.zst | tee /tmp/namcap-package.txt
           if grep -q ' E: ' /tmp/namcap-package.txt; then
             echo "::error::namcap reported errors for the package"
             exit 1
@@ -78,6 +82,14 @@ jobs:
           pacman -U --noconfirm "$BUILD_DIR"/python-gunsnprices-*-any.pkg.tar.zst
           pacman -Qi python-gunsnprices
           pacman -Ql python-gunsnprices | grep -v '/__pycache__/'
+
+      # Information only. namcap's pydepends rule looks up the imports of
+      # /usr/bin/gunsnprices in the system site-packages; before the install
+      # it cannot find the package's own module "gunsnprices".
+      - name: namcap on the package, with the package installed
+        working-directory: ${{ env.BUILD_DIR }}
+        run: |
+          env PATH="$ARCH_PATH" namcap python-gunsnprices-*-any.pkg.tar.zst | tee /tmp/namcap-package-installed.txt
 
       - name: Run the installed CLI and import the module
         working-directory: /tmp
@@ -119,7 +131,7 @@ jobs:
             echo "## python-gunsnprices on archlinux:latest"
             echo
             echo "pacman $(pacman -Q pacman | cut -d' ' -f2), python $(pacman -Q python | cut -d' ' -f2), namcap $(pacman -Q namcap | cut -d' ' -f2)"
-            for f in namcap-pkgbuild namcap-package check-result; do
+            for f in namcap-pkgbuild namcap-package namcap-package-installed check-result; do
               echo
               echo "### $f"
               echo '```'

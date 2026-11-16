@@ -61,9 +61,13 @@ and `LICENSE-DATA` to `/usr/share/licenses/python-gunsnprices/`.
 2. `namcap PKGBUILD` (the job fails on errors).
 3. `makepkg --syncdeps --rmdeps --cleanbuild` as an unprivileged user. Only the declared
    dependencies are installed, and `check()` runs the test suite.
-4. `namcap` on the built `.pkg.tar.zst`.
-5. `pacman -U` of the package, then `gunsnprices --help`, `--version`, a firearm title and an
-   ammunition title with `--price`, and an import of the module from `/usr/lib/python3.*`.
+4. `namcap` on the built `.pkg.tar.zst` (fails on errors), with the PATH of an Arch login shell.
+5. `pacman -U` of the package, a second `namcap` run with the package installed (information
+   only), then `gunsnprices --help`, `--version`, a firearm title, an ammunition title with
+   `--price`, and an import of the module from `/usr/lib/python3.*`.
+
+The results of the last check, including the one namcap warning (a false positive), are in
+[PUBLISHING.md](PUBLISHING.md#what-ci-verified).
 
 [`.github/workflows/arch-command.yml`](.github/workflows/arch-command.yml) is a manual helper
 that runs one shell command in `archlinux:latest`. It is used to answer the `pacman` question on

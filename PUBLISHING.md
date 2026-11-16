@@ -21,7 +21,8 @@ matching `gunsnprices`.
 | Not in the official repositories, no duplicate in the AUR, supports `x86_64` (`arch=('any')` does), no `-git`/`-bin` suffix for a versioned source build. | [AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines#Rules_of_submission) |
 | A `# Maintainer: Name <address at domain dot tld>` comment at the top of the `PKGBUILD`. | same |
 | Add a `LICENSE` file for the package sources; 0BSD is encouraged (RFC 0040). | same |
-| Every commit must include `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`). Only the `master` branch is accepted. The git hook also rejects commits that contain subdirectories, so `.github/` and the docs of this repo are not uploaded. | same, "Publishing new package content" |
+| Every commit must include `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`). Only the `master` branch is accepted. | same, "Publishing new package content" |
+| The AUR's git update hook also rejects commits that contain subdirectories, so `.github/` and the documentation of this repository are not uploaded. Only `PKGBUILD`, `.SRCINFO` and `LICENSE` go to the AUR. | aurweb `git/update.py` |
 | Commits are authored with the git name and email, and they are hard to change after the push. Set them per repository. | same |
 
 ## 1. Register an AUR account (owner, once)
@@ -143,5 +144,43 @@ The `-c init.defaultBranch=master` matters: the AUR accepts only `master`.
 
 ## What CI verified
 
-See the "Arch Linux" workflow runs. The job summary of each run lists the namcap output and the
-pytest result.
+Run https://github.com/gunsnprices/aur-python-gunsnprices/actions/runs/43883457053 (commit
+`048dd12`, 2026-11-16) in `archlinux:latest` with pacman 7.1.0.r9.g54d9411-4, python 3.14.10-1
+and namcap 3.6.0-3:
+
+- `makepkg --printsrcinfo` is identical to the committed `.SRCINFO`.
+- `namcap PKGBUILD`: no output.
+- `makepkg --syncdeps --rmdeps --cleanbuild` as the unprivileged user `builder`: the sha256 and
+  b2 checksums passed, makepkg installed only the declared `makedepends` and `checkdepends`
+  (and removed them afterwards), and `check()` reported `1191 passed`.
+- `namcap` on the built `python-gunsnprices-0.1.2-1-any.pkg.tar.zst`, before it is installed
+  (the order `makechrootpkg -n` uses): one warning, no errors:
+
+      python-gunsnprices W: Referenced python module 'gunsnprices.__main__.main' is an uninstalled dependency (needed in files ['usr/bin/gunsnprices'])
+
+  This is a false positive. namcap's `pydepends` rule resolves the imports of the console
+  script `/usr/bin/gunsnprices` (`from gunsnprices.__main__ import main`) against the installed
+  packages only, and the module belongs to the package being checked. The same `namcap` run
+  with the package installed prints nothing.
+- `pacman -U` installed the package. `pacman -Qi` shows URL https://gunsnprices.com/developers,
+  licenses `MIT AND CC-BY-4.0` and depends `python`. The files are `/usr/bin/gunsnprices`, the
+  module and its dist-info in `/usr/lib/python3.14/site-packages/`, and `LICENSE` and
+  `LICENSE-DATA` in `/usr/share/licenses/python-gunsnprices/`.
+- The installed CLI: `gunsnprices --help` works, and `gunsnprices --version` prints
+  `gunsnprices 0.1.2`. `gunsnprices "Glock 19 Gen 5 9mm 15rd"` returned kind `firearm`, brand
+  Glock, model "Glock 19 Gen 5", caliber `9x19mmparabellum` and capacity 15. Piping
+  `Federal American Eagle 9mm 115gr FMJ 50rd` into `gunsnprices --price 18.99` returned kind
+  `ammo`, 50 rounds and cost per round 0.3798. `import gunsnprices` loads from
+  `/usr/lib/python3.14/site-packages/`.
+
+namcap runs with the PATH of an Arch login shell (`/usr/local/sbin:/usr/local/bin:/usr/bin`).
+The container's default PATH also contains `/usr/sbin`, which makes namcap's shebang rule
+resolve `python` to `/usr/sbin/python`, a path no package owns. That produced a second, false
+warning in the first run.
+
+The helper workflow `arch-command.yml` was tested with
+`LC_ALL=C pacman -V|sed -r 's#[0-9]+#42#g'|md5sum|cut -c1-6` (output `bca81b`).
+
+Not tested: a build in a clean chroot with devtools (`pkgctl build`, `extra-x86_64-build`). It
+needs systemd-nspawn, which does not run in the GitHub Actions container. makepkg with
+`--syncdeps --rmdeps` from a minimal `base-devel` system gives similar dependency coverage.

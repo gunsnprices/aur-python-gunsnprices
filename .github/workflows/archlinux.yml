@@ -1,0 +1,129 @@
+name: Arch Linux
+
+# Builds the AUR package the way an Arch user would: makepkg as an
+# unprivileged user in archlinux:latest, with only the dependencies the
+# PKGBUILD declares. Then namcap, pacman -U and a CLI run.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  makepkg:
+    name: makepkg, namcap, install (archlinux:latest)
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      BUILD_DIR: /home/builder/build
+    steps:
+      - name: Update the system; install base-devel, namcap and git
+        run: |
+          pacman -Syu --noconfirm --needed base-devel namcap git
+          pacman -Q pacman python namcap
+
+      - uses: actions/checkout@v4
+
+      - name: Create the unprivileged build user
+        run: |
+          useradd --create-home builder
+          # makepkg --syncdeps and --rmdeps call "sudo pacman"
+          echo 'builder ALL=(root) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/builder
+          chmod 0440 /etc/sudoers.d/builder
+          install -d -o builder -g builder "$BUILD_DIR"
+          install -m 0644 -o builder -g builder PKGBUILD .SRCINFO LICENSE "$BUILD_DIR/"
+
+      - name: .SRCINFO matches makepkg --printsrcinfo
+        working-directory: ${{ env.BUILD_DIR }}
+        run: |
+          sudo -H -u builder makepkg --printsrcinfo > /tmp/SRCINFO.generated
+          diff -u .SRCINFO /tmp/SRCINFO.generated
+          echo ".SRCINFO is up to date"
+
+      - name: namcap PKGBUILD
+        working-directory: ${{ env.BUILD_DIR }}
+        run: |
+          namcap PKGBUILD | tee /tmp/namcap-pkgbuild.txt
+          if grep -q ' E: ' /tmp/namcap-pkgbuild.txt; then
+            echo "::error::namcap reported errors for PKGBUILD"
+            exit 1
+          fi
+
+      - name: makepkg --syncdeps --rmdeps (build, check, package)
+        working-directory: ${{ env.BUILD_DIR }}
+        run: |
+          sudo -H -u builder makepkg --syncdeps --rmdeps --cleanbuild --noconfirm 2>&1 | tee /tmp/makepkg.log
+          grep -E '^=+ .*[0-9]+ passed' /tmp/makepkg.log | tail -n 1 | tee /tmp/check-result.txt
+          ls -l ./*.pkg.tar.zst
+
+      - name: namcap on the built package
+        working-directory: ${{ env.BUILD_DIR }}
+        run: |
+          namcap python-gunsnprices-*-any.pkg.tar.zst | tee /tmp/namcap-package.txt
+          if grep -q ' E: ' /tmp/namcap-package.txt; then
+            echo "::error::namcap reported errors for the package"
+            exit 1
+          fi
+
+      - name: Install the package with pacman
+        run: |
+          pacman -U --noconfirm "$BUILD_DIR"/python-gunsnprices-*-any.pkg.tar.zst
+          pacman -Qi python-gunsnprices
+          pacman -Ql python-gunsnprices | grep -v '/__pycache__/'
+
+      - name: Run the installed CLI and import the module
+        working-directory: /tmp
+        run: |
+          pkgver=$(sed -n 's/^\tpkgver = //p' "$BUILD_DIR/.SRCINFO")
+          command -v gunsnprices
+          gunsnprices --help
+          test "$(gunsnprices --version)" = "gunsnprices $pkgver"
+
+          # Title as arguments -> pretty JSON
+          gunsnprices "Glock 19 Gen 5 9mm 15rd" | tee firearm.json
+          # Titles on stdin -> JSON Lines, with cost per round
+          echo "Federal American Eagle 9mm 115gr FMJ 50rd" \
+            | gunsnprices --price 18.99 | tee ammo.jsonl
+
+          python - "$pkgver" <<'PY'
+          import json, sys
+          import gunsnprices
+          assert gunsnprices.__file__.startswith("/usr/lib/python3"), gunsnprices.__file__
+          assert gunsnprices.__version__ == sys.argv[1], gunsnprices.__version__
+          f = json.load(open("firearm.json", encoding="utf-8"))
+          assert f["kind"] == "firearm", f
+          assert f["brand"] == "Glock", f
+          assert f["model"]["model"] == "Glock 19 Gen 5", f
+          assert f["caliber"]["id"] == "9x19mmparabellum", f
+          assert f["capacity"] == 15, f
+          a = json.loads(open("ammo.jsonl", encoding="utf-8").readline())
+          assert a["kind"] == "ammo", a
+          assert a["caliber"]["id"] == "9x19mmparabellum", a
+          assert a["rounds"] == 50, a
+          assert abs(a["cost_per_round"] - 0.3798) < 1e-9, a
+          print("CLI and import test OK:", gunsnprices.__file__)
+          PY
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## python-gunsnprices on archlinux:latest"
+            echo
+            echo "pacman $(pacman -Q pacman | cut -d' ' -f2), python $(pacman -Q python | cut -d' ' -f2), namcap $(pacman -Q namcap | cut -d' ' -f2)"
+            for f in namcap-pkgbuild namcap-package check-result; do
+              echo
+              echo "### $f"
+              echo '```'
+              if [ -s "/tmp/$f.txt" ]; then cat "/tmp/$f.txt"; else echo "(no output)"; fi
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,32 @@
+name: Run a command on Arch Linux
+
+# Manual helper. The AUR registration form asks for the output of a shell
+# command that must run on Arch Linux (it calls pacman). Paste that command
+# here (Actions -> "Run a command on Arch Linux" -> Run workflow) and read the
+# answer in the log. Only accounts with write access can start this workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Shell command to run in archlinux:latest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    timeout-minutes: 10
+    steps:
+      - name: Run the command
+        env:
+          COMMAND: ${{ inputs.command }}
+        run: |
+          pacman -Q pacman
+          printf 'Command: %s\n' "$COMMAND"
+          printf 'Output:\n'
+          bash -c "$COMMAND"
